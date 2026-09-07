@@ -13,8 +13,8 @@ text_model = os.environ['MODEL']
 
 def create_model():
     return ChatOpenAI(
-        api_key='sk-IPlyoptZKmZBwMZlWveCZKeunTGjVPbHs5axMLFSPEFKvig2',
-        base_url="https://api.agicto.cn/v1/",
+        api_key=key,
+        base_url=url,
         model='gpt-5.6-luna',
         temperature=0
     )
