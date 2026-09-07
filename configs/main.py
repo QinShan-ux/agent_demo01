@@ -5,17 +5,17 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
+config = {
+    "host": os.getenv("DB_HOST", "8.155.1.111"),
+    "port": int(os.getenv("DB_PORT", 3306)),
+    "user": os.getenv("DB_USER", "root"),
+    "password": os.getenv("DB_PASSWORD", "root"),
+    "charset": "utf8mb4"
+}
+
 
 async def init_mysql_database():
     """初始化MySQL数据库（只在表不存在时创建）"""
-
-    config = {
-        "host": os.getenv("DB_HOST", "8.155.1.111"),
-        "port": int(os.getenv("DB_PORT", 3306)),
-        "user": os.getenv("DB_USER", "root"),
-        "password": os.getenv("DB_PASSWORD", "root"),
-        "charset": "utf8mb4"
-    }
 
     db_name = os.getenv("DB_NAME", "agent_db")
 
@@ -83,3 +83,42 @@ async def init_mysql_database():
                 print("ℹ️ 表 'tool_definitions' 已存在，跳过创建")
 
     print("🎉 MySQL 数据库初始化完成（无需重复创建）！")
+
+
+async def main():
+    await init_mysql_database()  # ✅ 正确
+
+
+async def test_con():
+    async with aiomysql.connect(**config) as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+                select * from agent_db.tool_definitions
+            """)
+
+            rows = await cursor.fetchall()
+            for row in rows:
+                print(row)
+            await cursor.execute("""
+                                INSERT INTO agent_db.tool_definitions (id, name, description, type, api_config, parameters) VALUES 
+(
+    'tool_002',
+    'get_weather1',
+    '查询中国城市实时天气信息，包括温度、湿度、风向等',
+    'api',
+    '{"url": "https://uapis.cn/api/v1/misc/weather", "method": "GET", "timeout": 10}',
+    '[{"name": "city", "type": "string", "description": "城市名称，如北京、上海", "required": true}]'
+);
+                            """)
+
+            await cursor.execute("""
+                            select * from agent_db.tool_definitions
+                        """)
+
+            rows = await cursor.fetchall()
+            for row in rows:
+                print(row)
+
+
+if __name__ == "__main__":
+    asyncio.run(test_con())

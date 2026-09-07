@@ -10,7 +10,7 @@ class ToolConfig(BaseModel):
     name: str
     description: str
     endpoint: str
-    method: str = "GET"
+    api_config: Dict[str, Any] = {}
     parameters: Dict[str, Any] = {}
 
 
