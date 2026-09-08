@@ -9,3 +9,46 @@ GET http://127.0.0.1:8000/hello/User
 Accept: application/json
 
 ###
+
+GET http://127.0.0.1:8000/test/ping
+Accept: application/json
+
+###
+
+POST http://127.0.0.1:8000/test/echo
+Content-Type: application/json
+
+{
+  "message": "hello"
+}
+
+###
+
+POST http://127.0.0.1:8000/excel/upload
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="测试.xlsx"
+Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+
+< ./your_file.xlsx
+--WebAppBoundary--
+
+###
+
+POST http://127.0.0.1:8000/excel/merge
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="files"; filename="file1.xlsx"
+Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+
+< ./your_file1.xlsx
+--WebAppBoundary
+Content-Disposition: form-data; name="files"; filename="file2.xlsx"
+Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+
+< ./your_file2.xlsx
+--WebAppBoundary--
+
+###
