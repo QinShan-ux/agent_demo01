@@ -15,6 +15,6 @@ def create_model():
     return ChatOpenAI(
         api_key=key,
         base_url=url,
-        model='gpt-5.6-luna',
+        model='deepseek-v4-flash-vision-exp',
         temperature=0
     )
