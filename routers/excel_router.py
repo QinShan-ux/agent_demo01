@@ -1,10 +1,12 @@
 from typing import List
 
 import io
+import json
+import re
 from urllib.parse import quote
 
 import pandas as pd
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 
 from model import *
@@ -14,11 +16,36 @@ router = APIRouter(prefix="/excel", tags=["excel"])
 # 允许上传的excel文件后缀
 ALLOWED_EXCEL_SUFFIXES = {".xlsx", ".xls", ".xlsm"}
 
-desired_columns = ["序号", "姓名", "性别", "身份证号", "民族", "联系电话", "全住宿", "半走读", "班级", "宿舍号",
-                       "床铺号"]
+# 默认保留的列（前端未传时使用）
+DEFAULT_DESIRED_COLUMNS = ["序号", "姓名", "性别", "身份证号", "民族", "联系电话", "全住宿", "半走读", "班级", "宿舍号",
+                           "床铺号"]
+# 默认需要填充的列（处理合并单元格导致的空值）
+DEFAULT_COLUMNS_TO_FILL = ["宿舍号"]
 def get_suffix(filename: str) -> str:
     """获取文件小写后缀，无后缀时返回空字符串"""
     return "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+
+def parse_column_list(raw: List[str]) -> List[str]:
+    """解析前端传入的列名列表，兼容三种传法并去除每项首尾空白：
+    1. 同名字段重复提交: desired_columns=姓名&desired_columns=班级
+    2. 逗号分隔的字符串: desired_columns=姓名,班级
+    3. 整体序列化为一个JSON字符串: desired_columns=["姓名","班级"]
+    """
+    items: List[str] = []
+    for value in raw:
+        s = value.strip()
+        if s.startswith("[") and s.endswith("]"):
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, list):
+                    items.extend(str(item) for item in parsed)
+                    continue
+            except json.JSONDecodeError:
+                pass
+        # 逗号分隔（兼容中文逗号）
+        items.extend(re.split(r"[,，]", s))
+    return [item.strip() for item in items if item.strip()]
 
 
 @router.post("/created_titles")
@@ -51,8 +78,8 @@ async def upload_excel(file: UploadFile = File(..., description="excel文件")):
             {
                 "sheet_name": name,
                 "rows": len(df),
-                "columns": [col for col in desired_columns if col in df.columns],  # 只显示存在的列
-                "preview": df.head(5).reindex(columns=desired_columns).fillna("").to_dict(orient="records")
+                "columns": [col for col in DEFAULT_DESIRED_COLUMNS if col in df.columns],  # 只显示存在的列
+                "preview": df.head(5).reindex(columns=DEFAULT_DESIRED_COLUMNS).fillna("").to_dict(orient="records")
             }
             for name, df in sheets.items()
         ],
@@ -60,7 +87,19 @@ async def upload_excel(file: UploadFile = File(..., description="excel文件")):
     return {"code": 0, "message": "success", "data": data}
 
 @router.post("/format-excel")
-async def upload_excel(file: UploadFile = File(..., description="excel文件")):
+async def upload_excel(
+        file: UploadFile = File(..., description="excel文件"),
+        desired_columns: List[str] = Form(default=DEFAULT_DESIRED_COLUMNS, description="需要保留的列名列表"),
+        columns_to_fill: List[str] = Form(default=DEFAULT_COLUMNS_TO_FILL,
+                                          description="需要向前填充的列名列表（处理合并单元格）"),
+):
+    """上传文件，输出desired_columns的列，同时将columns_to_fill的列进行填充，最后输出新的文件
+
+    desired_columns / columns_to_fill 由前端通过表单字段传入，同名字段重复提交即可传列表；
+    未传时使用默认列。
+    """
+    desired_columns = parse_column_list(desired_columns)
+    columns_to_fill = parse_column_list(columns_to_fill)
     result = await _file(file)
 
     # 检查是否成功
@@ -83,10 +122,7 @@ async def upload_excel(file: UploadFile = File(..., description="excel文件")):
         if existing_columns:
             # 先过滤出需要的列
             df_filtered = df[existing_columns].copy()
-            # 只对特定列进行填充（处理合并单元格）
-            # 例如：只填充 "姓名" 和 "班级" 列
-            columns_to_fill = ["宿舍号"]  # 指定需要填充的列
-
+            # 只对前端指定的列进行填充（处理合并单元格导致的空值）
             for col in columns_to_fill:
                 if col in df_filtered.columns:
                     # 向前填充
@@ -98,7 +134,15 @@ async def upload_excel(file: UploadFile = File(..., description="excel文件")):
             new_sheets[name] = df_filtered
 
     if not new_sheets:
-        return {"code": 1, "message": "没有找到匹配的列，无法生成新表格", "data": None}
+        # 返回实际收到的列名和表格中真实的列名，便于前端排查不匹配的原因
+        return {
+            "code": 1,
+            "message": "没有找到匹配的列，无法生成新表格",
+            "data": {
+                "received_desired_columns": desired_columns,
+                "sheet_columns": {name: list(df.columns) for name, df in sheets.items()},
+            },
+        }
 
     # 将新表格写入内存
     output = io.BytesIO()
