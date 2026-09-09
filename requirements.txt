@@ -54,3 +54,4 @@ zstandard==0.25.0
 cryptography===39.0.0
 
 pycparser
+pandas

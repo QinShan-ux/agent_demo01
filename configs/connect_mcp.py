@@ -18,7 +18,7 @@ async def main():
         "math_server": {
             "transport": "stdio",
             "command": "python",
-            "args": ["/Users/linan/project/python/agent/demo01/mcp_demo.py"],  # 你的服务器脚本路径
+            "args": ["C:/X/project/python/agent/agent_demo01/mcp_demo.py"],  # 你的服务器脚本路径
         }
     })
 
@@ -55,7 +55,7 @@ async def main():
         system_prompt="直接计算，只返回数字结果，不解释。")
 
     # 4. 与 Agent 对话
-    user_query = "3 加 5 等于多少"
+    user_query = "3 加 5 等于多少? 结果乘2等于多少"
     print(f"👤 用户: {user_query}")
 
     response = await agent.ainvoke(
@@ -67,8 +67,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    time1 = datetime.now()
+    time1 = time.time()
     asyncio.run(main())
-    time2 = datetime.now()
-    d = time2 - time1
-    print(f'流程总共耗时 {d.seconds}')
+    print(f'流程总共耗时 {time.time() - time1:.2f}s')
