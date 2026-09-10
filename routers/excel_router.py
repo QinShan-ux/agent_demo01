@@ -10,20 +10,17 @@ from fastapi import APIRouter, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 
 from model import *
+from utils.excel import (
+    ALLOWED_EXCEL_SUFFIXES,
+    DEFAULT_COLUMNS_TO_FILL,
+    DEFAULT_DESIRED_COLUMNS,
+    analyze_excel,
+    format_excel as excel_format,
+    get_suffix,
+    read_excel_sheets,
+)
 
 router = APIRouter(prefix="/excel", tags=["excel"])
-
-# 允许上传的excel文件后缀
-ALLOWED_EXCEL_SUFFIXES = {".xlsx", ".xls", ".xlsm"}
-
-# 默认保留的列（前端未传时使用）
-DEFAULT_DESIRED_COLUMNS = ["序号", "姓名", "性别", "身份证号", "民族", "联系电话", "全住宿", "半走读", "班级", "宿舍号",
-                           "床铺号"]
-# 默认需要填充的列（处理合并单元格导致的空值）
-DEFAULT_COLUMNS_TO_FILL = ["宿舍号"]
-def get_suffix(filename: str) -> str:
-    """获取文件小写后缀，无后缀时返回空字符串"""
-    return "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
 
 def parse_column_list(raw: List[str]) -> List[str]:
@@ -58,36 +55,10 @@ async def created_titles(titles: RequestBody[List[ExcelTitle]]):
 @router.post("/upload")
 async def upload_excel(file: UploadFile = File(..., description="excel文件")):
     """接收excel文件，解析所有sheet并返回预览数据"""
-    # 校验文件后缀
-    # 调用 _file 函数
-    result = await _file(file)
-
-    # 检查是否成功
-    if result.get("code") == 1:
-        return result
-
-    # 从字典中获取数据（使用键访问）
-    sheets = result["sheets"]  # 而不是 result.sheets
-    filename = result["filename"]
-    content = result["content"]
-
-    data = {
-        "filename": filename,
-        "size": len(content),
-        "sheets": [
-            {
-                "sheet_name": name,
-                "rows": len(df),
-                "columns": [col for col in DEFAULT_DESIRED_COLUMNS if col in df.columns],  # 只显示存在的列
-                "preview": df.head(5).reindex(columns=DEFAULT_DESIRED_COLUMNS).fillna("").to_dict(orient="records")
-            }
-            for name, df in sheets.items()
-        ],
-    }
-    return {"code": 0, "message": "success", "data": data}
+    return await analyze_excel(file)
 
 @router.post("/format-excel")
-async def upload_excel(
+async def format_excel(
         file: UploadFile = File(..., description="excel文件"),
         desired_columns: List[str] = Form(default=DEFAULT_DESIRED_COLUMNS, description="需要保留的列名列表"),
         columns_to_fill: List[str] = Form(default=DEFAULT_COLUMNS_TO_FILL,
@@ -100,49 +71,15 @@ async def upload_excel(
     """
     desired_columns = parse_column_list(desired_columns)
     columns_to_fill = parse_column_list(columns_to_fill)
-    result = await _file(file)
 
-    # 检查是否成功
-    if result.get("code") == 1:
-        return result
+    res = await excel_format(file, desired_columns, columns_to_fill)
 
-    # 从字典中获取数据（使用键访问）
-    sheets = result["sheets"]  # 而不是 result.sheets
-    filename = result["filename"]
+    # 读取/解析失败、无匹配列等错误直接返回
+    if res.get("code") == 1:
+        return res
 
-    # 创建新表格
-    new_sheets = {}
-    for name, df in sheets.items():
-        # 先处理合并单元格：向前填充空值
-        # 对于每一列，如果是合并单元格导致的空值，用前面的值填充
-        # df_filled = df.ffill()  # 向下填充（forward fill）
-        # df_filled = df_filled.bfill()  # 向上填充（backward fill）
-
-        existing_columns = [col for col in desired_columns if col in df.columns]
-        if existing_columns:
-            # 先过滤出需要的列
-            df_filtered = df[existing_columns].copy()
-            # 只对前端指定的列进行填充（处理合并单元格导致的空值）
-            for col in columns_to_fill:
-                if col in df_filtered.columns:
-                    # 向前填充
-                    df_filtered[col] = df_filtered[col].ffill()
-                    # 如果第一行是空，向上填充
-                    if pd.isna(df_filtered[col].iloc[0]):
-                        df_filtered[col] = df_filtered[col].bfill()
-
-            new_sheets[name] = df_filtered
-
-    if not new_sheets:
-        # 返回实际收到的列名和表格中真实的列名，便于前端排查不匹配的原因
-        return {
-            "code": 1,
-            "message": "没有找到匹配的列，无法生成新表格",
-            "data": {
-                "received_desired_columns": desired_columns,
-                "sheet_columns": {name: list(df.columns) for name, df in sheets.items()},
-            },
-        }
+    new_sheets = res["new_sheets"]
+    filename = res["filename"]
 
     # 将新表格写入内存
     output = io.BytesIO()
@@ -218,27 +155,4 @@ async def merge_excel(files: List[UploadFile] = File(..., description="多个exc
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
-
-
-async def _file(file: UploadFile):
-    """接收excel文件，解析所有sheet并返回预览数据"""
-    # 校验文件后缀
-    filename = file.filename or ""
-    suffix = get_suffix(filename)
-    if suffix not in ALLOWED_EXCEL_SUFFIXES:
-        return {"code": 1, "message": f"不支持的文件类型: {suffix or '未知'}，仅支持 {sorted(ALLOWED_EXCEL_SUFFIXES)}",
-                "data": None}
-
-    content = await file.read()
-
-    try:
-        # sheet_name=None 同时解析所有sheet
-        sheets: dict = pd.read_excel(io.BytesIO(content), sheet_name=None)
-        return {
-            "sheets": sheets,
-            "filename": filename,
-            "content": content
-        }
-    except Exception as e:
-        return {"code": 1, "message": f"excel文件解析失败: {e}", "data": None}
 
