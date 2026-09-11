@@ -55,3 +55,4 @@ cryptography===39.0.0
 
 pycparser
 pandas
+marker
