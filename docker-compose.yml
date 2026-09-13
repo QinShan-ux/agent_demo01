@@ -1,0 +1,24 @@
+services:
+  weaviate:
+    command:
+    - --host
+    - 0.0.0.0
+    - --port
+    - '8080'
+    - --scheme
+    - http
+    image: semitechnologies/weaviate # 建议替换为你需要的具体版本
+    ports:
+    - "8001:8080"   # HTTP API 端口
+    - "50051:50051" # gRPC API 端口
+    restart: on-failure:0
+    volumes:
+    - weaviate_data:/var/lib/weaviate # 持久化数据，防止容器重启后丢失
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true' # 生产环境应关闭此项
+      PERSISTENCE_DATA_PATH: '/var/lib/weaviate'
+      CLUSTER_HOSTNAME: 'node1'
+
+volumes:
+  weaviate_data:

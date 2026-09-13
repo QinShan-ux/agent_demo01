@@ -12,6 +12,9 @@ text_model = os.environ['MODEL']
 
 
 def create_model():
+    """
+    Create an OpenAI Chat model.
+    """
     return ChatOpenAI(
         api_key=key,
         base_url=url,
