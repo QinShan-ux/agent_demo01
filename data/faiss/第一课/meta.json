@@ -1,0 +1,9 @@
+{
+  "source": "/Users/linan/project/python/agent/demo01/utils/clent_text/第一课.clean.md",
+  "embed_model": "text-embedding-3-small",
+  "dim": 1536,
+  "count": 127,
+  "created_at": "2026-09-15T21:08:28",
+  "source_size": 63654,
+  "source_sha256": "c7b02d9af377e942f3a1dd08d212290f1ea7f176c71bd057d8996e6c73444dcb"
+}
