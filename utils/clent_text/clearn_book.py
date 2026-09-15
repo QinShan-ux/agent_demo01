@@ -23,7 +23,7 @@ def clean_stream(input_path: str, output_path: str):
             if buffer:
                 paragraph = ''.join(buffer).strip()
                 if paragraph:
-                    fout.write(paragraph + '\n\n')
+                    fout.write(paragraph + '\n')
                 buffer.clear()
 
         for line in fin:
@@ -33,6 +33,8 @@ def clean_stream(input_path: str, output_path: str):
             if re.fullmatch(r'\s*\d+\s*', line):
                 continue
 
+            if line.strip() == '':
+                continue
             line = re.sub('◆+','',line)
             stripped = line.strip()
 
@@ -42,7 +44,7 @@ def clean_stream(input_path: str, output_path: str):
 
             if is_special(line):
                 flush()
-                fout.write(stripped + '\n\n')
+                fout.write(stripped + '\n')
                 continue
 
             buffer.append(stripped)
