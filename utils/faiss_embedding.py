@@ -2,7 +2,7 @@
 
 支持两种切片策略（--strategy）：
   heading       按标题层次切（默认）
-  parent_child  父子块：父块按标题切、子块按段落切；子块用于检索，命中后返回父块完整上下文
+  parent_child  父子块：父块按标题切、子块按句子聚合；子块用于检索，命中后返回父块完整上下文
 
 索引按策略持久化到各自目录：heading -> data/faiss/第一课，parent_child -> data/faiss/第一课_parent_child。
 两者互不覆盖，切换策略时直接加载对应目录的缓存，无需重新向量化。
@@ -41,27 +41,45 @@ META_FILE = "meta.json"
 EMBED_MODEL = "text-embedding-3-small"
 BATCH_SIZE = 32
 MAX_CHARS = 1000  # 单个切片的最大字符数，超长章节按段落再切
-CHILD_MAX_CHARS = 300  # 父子块策略中子块（段落）的最大字符数，越小检索越精准
+CHILD_MAX_CHARS = 200  # 父子块策略中子块（段落）的最大字符数，越小检索越精准
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+# 句末标点或换行作为句子边界，标点/换行保留在句子里，聚合时原样拼接
+SENTENCE_RE = re.compile(r"[^。！？；!?;\n]*(?:[。！？；!?;\n]|$)")
 
 client = OpenAI(api_key=os.environ["API_KEY"], base_url=os.environ["API_URL"])
 
 
 def _split_long(content: str, max_chars: int = MAX_CHARS) -> list[str]:
-    """超长内容按空行（段落）再切，避免超过 embedding 接口的长度上限。"""
+    """按句子切分后聚合到不超过 max_chars 的片段，避免超过 embedding 接口的长度上限。
+
+    先按句末标点与换行切出句子（标点/换行保留在句子里），再把句子顺序聚合，
+    使每个片段尽量接近 max_chars 且不截断句子；单个句子超长时按字符硬切兜底。
+    """
     if len(content) <= max_chars:
         return [content]
 
+    sentences = SENTENCE_RE.findall(content)
     pieces, buf, size = [], [], 0
-    for para in content.split("\n\n"):
-        if buf and size + len(para) > max_chars:
-            pieces.append("\n\n".join(buf))
+    for sent in sentences:
+        if not sent:
+            continue
+        # 单个句子超长：先把已聚合的 buf 落盘，再按字符硬切
+        while len(sent) > max_chars:
+            if buf:
+                pieces.append("".join(buf))
+                buf, size = [], 0
+            pieces.append(sent[:max_chars])
+            sent = sent[max_chars:]
+        if not sent:
+            continue
+        if buf and size + len(sent) > max_chars:
+            pieces.append("".join(buf))
             buf, size = [], 0
-        buf.append(para)
-        size += len(para) + 2
+        buf.append(sent)
+        size += len(sent)
     if buf:
-        pieces.append("\n\n".join(buf))
+        pieces.append("".join(buf))
     return pieces
 
 
@@ -102,7 +120,7 @@ def split_markdown(text: str) -> list[dict]:
 
 
 def split_parent_child(text: str) -> tuple[list[dict], list[dict]]:
-    """父子块策略：父块按标题切（保留完整章节上下文），子块再把父块正文按段落切。
+    """父子块策略：父块按标题切（保留完整章节上下文），子块再把父块正文按句子聚合。
 
     返回 (parents, children)。子块用于向量化和检索（更精准），命中后返回父块完整上下文（更完整）。
     每个子块带 parent_idx 和 parent 全文，检索命中时可直接取父块。
@@ -113,8 +131,8 @@ def split_parent_child(text: str) -> tuple[list[dict], list[dict]]:
         prefix = " > ".join(parent["headings"])
         # parent["text"] 形如 f"{prefix}\n{body}"（无标题时就是 body），去掉前缀得到正文再切
         body = parent["text"][len(prefix) + 1 :] if prefix else parent["text"]
-        for para in _split_long(body, CHILD_MAX_CHARS):
-            child_text = f"{prefix}\n{para}" if prefix else para
+        for piece in _split_long(body, CHILD_MAX_CHARS):
+            child_text = f"{prefix}\n{piece}" if prefix else piece
             children.append(
                 {
                     "text": child_text,
@@ -253,7 +271,7 @@ def test(text:list[str]):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="markdown -> faiss 向量索引")
     parser.add_argument("-f", "--force", action="store_true", help="忽略已有索引，重新切片并向量化")
-    parser.add_argument("-q", "--query", default="新时代中国特色社会主义的内容？", help="建好索引后用来验证检索的 query")
+    parser.add_argument("-q", "--query", default="资本主义经济危机爆发的原因？", help="建好索引后用来验证检索的 query")
     parser.add_argument(
         "--strategy",
         choices=["heading", "parent_child"],
