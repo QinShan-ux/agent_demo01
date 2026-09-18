@@ -21,13 +21,15 @@ from pathlib import Path
 import faiss
 import numpy as np
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import OpenAI, APIConnectionError, APITimeoutError, RateLimitError
 
 from rag.chunking import split_markdown, split_parent_child
 from rag.retrieval import make_hit
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import logging
 
 load_dotenv()
-
+logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent.parent
 MD_PATH = BASE_DIR / "utils" / "clent_text" / "第一课.clean.md"
 # 两种切片策略分目录保存，切换时直接加载各自缓存，无需重新向量化
@@ -40,21 +42,47 @@ META_FILE = "meta.json"
 
 EMBED_MODEL = "text-embedding-3-small"
 BATCH_SIZE = 32
+EMBED_DIM = 1024
 
 client = OpenAI(api_key=os.environ["API_KEY"], base_url=os.environ["API_URL"])
 
 
+@retry(
+    retry=retry_if_exception_type((
+            APIConnectionError, APITimeoutError, RateLimitError
+    )),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(min=1, max=10),
+    reraise=True,
+)
+def _embed_batch(batch: list[str]) -> list[list[float]]:
+    resp = client.embeddings.create(
+        model=EMBED_MODEL, input=batch, dimensions=EMBED_DIM
+    )
+    items = sorted(resp.data, key=lambda x: x.index)
+    return [it.embedding for it in items]
+
+
 def embed(texts: list[str], verbose: bool = True) -> np.ndarray:
     """批量取向量，并做 L2 归一化（配合 IndexFlatIP 等价于余弦相似度）。"""
-    vectors: list[list[float]] = []
-    for i in range(0, len(texts), BATCH_SIZE):
-        batch = texts[i : i + BATCH_SIZE]
-        resp = client.embeddings.create(model=EMBED_MODEL, input=batch)
-        vectors.extend(item.embedding for item in resp.data)
-        if verbose:
-            print(f"  已向量化 {min(i + BATCH_SIZE, len(texts))}/{len(texts)}")
+    if not texts:
+        return np.zeros((0, EMBED_DIM), dtype="float32")
 
-    arr = np.array(vectors, dtype="float32")
+    vectors: list[list[float]] = []
+    total = len(texts)
+    for i in range(0, total, BATCH_SIZE):
+        vectors.extend(_embed_batch(texts[i: i + BATCH_SIZE]))
+        if verbose:
+            logger.info("已向量化 %d/%d", min(i + BATCH_SIZE, total), total)
+
+    arr = np.ascontiguousarray(vectors, dtype="float32")
+    if arr.shape[1] != EMBED_DIM:
+        raise ValueError(f"返回维度 {arr.shape[1]} != EMBED_DIM={EMBED_DIM}")
+    if not np.isfinite(arr).all():
+        raise ValueError("embedding 含 nan/inf")
+    if np.any(np.linalg.norm(arr, axis=1) == 0):
+        raise ValueError("存在零向量，检查 embedding 是否异常")
+
     faiss.normalize_L2(arr)
     return arr
 
@@ -108,8 +136,10 @@ def build_index(md_path: Path = MD_PATH, out_dir: Path = None, force: bool = Fal
             return cached
 
     md_path = Path(md_path)
+    # read file
     text = md_path.read_text(encoding="utf-8")
 
+    # father and child chunk strategy
     if strategy == "parent_child":
         parents, sections = split_parent_child(text)
         print(f"切片完成（父子块）：{len(parents)} 个父块，{len(sections)} 个子块")
@@ -144,7 +174,7 @@ def build_index(md_path: Path = MD_PATH, out_dir: Path = None, force: bool = Fal
 
 
 def dense_search(
-    query: str, index, sections: list[dict], top_k: int = 5, query_vec: np.ndarray = None
+        query: str, index, sections: list[dict], top_k: int = 5, query_vec: np.ndarray = None
 ) -> list[dict]:
     """向量召回，走 make_hit 构造 hit（与 BM25 召回结构一致）。
 

@@ -65,7 +65,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--mode",
         choices=["all", "vector", "hybrid", "rerank"],
-        default="all",
+        default="rerank",
         help="对比哪些召回方式：vector=纯向量，hybrid=向量+BM25，rerank=hybrid 后再重排",
     )
     parser.add_argument("--top-k", type=int, default=5, help="每种模式最终返回条数")
@@ -89,6 +89,7 @@ if __name__ == "__main__":
 
     for query in queries:
         print(f"\n{'=' * 20} {query} {'=' * 20}")
+        # query embed
         query_vec = embed([query], verbose=False)  # 几种模式共用一次 query 编码
         dense = dense_search(query, index, sections, args.candidates, query_vec=query_vec)
         fused = rrf_fuse(

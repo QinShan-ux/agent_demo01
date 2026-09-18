@@ -8,6 +8,7 @@
 """
 
 import re
+import logging
 
 MAX_CHARS = 1000  # 单个切片的最大字符数，超长章节按段落再切
 CHILD_MAX_CHARS = 200  # 父子块策略中子块（段落）的最大字符数，越小检索越精准
@@ -15,6 +16,8 @@ CHILD_MAX_CHARS = 200  # 父子块策略中子块（段落）的最大字符数�
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 # 句末标点或换行作为句子边界，标点/换行保留在句子里，聚合时原样拼接
 SENTENCE_RE = re.compile(r"[^。！？；!?;\n]*(?:[。！？；!?;\n]|$)")
+# 字段的上限，现在是 当字段大于 HARD_LIMIT 时必须切分 ， 正式项目根据选择的模型来设置 HARD_LIMIT 也可以收纳柜tiktoken来计算
+HARD_LIMIT = 500
 
 
 def _split_long(content: str, max_chars: int = MAX_CHARS) -> list[str]:
@@ -31,13 +34,19 @@ def _split_long(content: str, max_chars: int = MAX_CHARS) -> list[str]:
     for sent in sentences:
         if not sent:
             continue
-        # 单个句子超长：先把已聚合的 buf 落盘，再按字符硬切
-        while len(sent) > max_chars:
+
+        # large sentence
+        if len(sent) > max_chars:
             if buf:
                 pieces.append("".join(buf))
                 buf, size = [], 0
-            pieces.append(sent[:max_chars])
-            sent = sent[max_chars:]
+            if len(sent) < HARD_LIMIT:
+                pieces.append("".join(sent))
+            else:
+                logging.warning("超长句 %d 字符，超过 HARD_LIMIT，强制切分", len(sent))
+                for i in range(0, len(sent),HARD_LIMIT):
+                    pieces.append(sent[i:i + HARD_LIMIT])
+
         if not sent:
             continue
         if buf and size + len(sent) > max_chars:
@@ -92,12 +101,13 @@ def split_parent_child(text: str) -> tuple[list[dict], list[dict]]:
     返回 (parents, children)。子块用于向量化和检索（更精准），命中后返回父块完整上下文（更完整）。
     每个子块带 parent_idx 和 parent 全文，检索命中时可直接取父块。
     """
+    # split father chunk
     parents = split_markdown(text)
     children: list[dict] = []
     for pid, parent in enumerate(parents):
         prefix = " > ".join(parent["headings"])
         # parent["text"] 形如 f"{prefix}\n{body}"（无标题时就是 body），去掉前缀得到正文再切
-        body = parent["text"][len(prefix) + 1 :] if prefix else parent["text"]
+        body = parent["text"][len(prefix) + 1:] if prefix else parent["text"]
         for piece in _split_long(body, CHILD_MAX_CHARS):
             child_text = f"{prefix}\n{piece}" if prefix else piece
             children.append(
