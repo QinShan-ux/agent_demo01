@@ -28,13 +28,26 @@ def clean_stream(input_path: str, output_path: str):
 
         for line in fin:
             # 1. 去图片
-            line = re.sub(r'!\[\]\([^)]*\)', '', line)
+            line = re.sub(r'^!\[.*?\]\(.*?\)[ \t]*\n?$', '', line)
             # 2. 去页码
             if re.fullmatch(r'\s*\d+\s*', line):
                 continue
 
+            # 人民出版社去除
+            if re.fullmatch(r'(#+) 人民教育出版社\s*', line):
+                continue
+
             if line.strip() == '':
                 continue
+            if line.strip() == '## 探究与分享':
+                line = line.replace('## 探究与分享','#### 相关链接')
+
+            if line.strip() == '## 相关链接':
+                line = line.replace('## 相关链接', '#### 相关链接')
+
+            if line.strip() == '## 专家点评':
+                line = line.replace('## 专家点评', '#### 专家点评')
+
             line = re.sub('◆+','',line)
             stripped = line.strip()
 
@@ -54,4 +67,4 @@ def clean_stream(input_path: str, output_path: str):
 
         flush()
 
-clean_stream('./../../data/markdown/2026年秋季版必修/2026年秋季版必修1.md', '第一课.clean.md')
+clean_stream('./../../data/pdf/2026年秋季版必修1_2.md', '第一课.md')
