@@ -5,3 +5,5 @@ __pycache__/
 *.py[cod]
 .claude
 .workbuddy
+src/data/logs/
+node_modules
