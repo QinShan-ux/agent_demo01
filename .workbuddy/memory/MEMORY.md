@@ -2,7 +2,7 @@
 
 ## 后端分层（2026-10-23 重构，现行结构）
 
-依赖单向：`api → services → repositories → models → core`；`rag` / `agent` / `utils` 是能力包，
+依赖单向：`api → services → repositories → models → core`；`rag` / `agent` / `prompting` / `utils` 是能力包，
 被 services 使用，自身只向下依赖。`configs/` 是早期实验目录，**不在应用链路里**，别往里加东西。
 
 ```
@@ -12,8 +12,10 @@ src/repositories/  user_repo / correction_repo / history_repo —— 只写 SQL�
 src/models/        tables/（表定义） + schemas/（请求体）
 src/core/          config（.env 只在这读）、db（引擎 + metadata）、security（口令/JWT 纯函数）、log_setup
 src/rag/           chunking / ppt_chunking / vector_store / retrieval / pipeline / correction_memory / cli
+src/prompting/     registry（Jinja2）/ router / rewrite（拆解）/ engine（process_request）
+src/prompts/       *.j2 模板：_base 骨架 + 四类生成模板 + 三个节点提示
 src/agent/         LLM 网关封装（create_model）
-src/utils/         文档转换、excel 解析、prompt 模板
+src/utils/         文档转换、excel 解析
 ```
 
 分层铁律（改代码前先对齐）：
@@ -66,6 +68,20 @@ Vue3 `<script setup>` + Vite + vue-router 4，**不引组件库**，样式手写
 贴底滚动用户上滑就不拽回；终态一律 `finally` 收口。
 设计令牌 `web/src/styles/base.css`：淡色底 + 深色字 + 细描边 + 柔和投影 + 大量留白，
 天蓝三档（`--sky #42abf0` / `--sky-wash #eef7fe` / `--sky-deep #1a7cc0`）。
+
+## Prompt 流水线（2026-10-27 起）
+
+- 所有 prompt 文案只在 `src/prompts/*.j2`，**代码里不许再出现整段中文提示**；加一种问法 = 加一个 j2 + 进 `ROUTES`
+- 生成模板一律 `{% extends "_base.j2" %}`，只写自己的 `{% block rules %}`（3 条以内）。
+  公共部分（角色 / 资料分工 / 溯源禁令 / 资料区 / 问题区）只有一份，改一处全类型生效
+- 四类：`decompose` / `causal` / `compare` / `general`。causal 只收「原因→机制→结果」类，
+  「意义 / 作用 / 目的」不要塞进去（那是问评价，骨架不对）
+- **路由看原始输入，检索与渲染看 real_question**：`分别 / 各自 / 区别` 是对答案结构的要求，
+  意图分离会把它们剥走，拿 real_question 判会把拆解题误判成普通题
+- Router 规则优先，判不出才问 LLM；LLM 挂了落 general（`routed_by` 记 rule/llm/default/forced 进日志）
+- `query_rewrite`（拆子问题）与 `intent_split`（问什么/怎么答）是两个节点，别合并进生成 prompt
+- `process_request` 两段式：先 `hits=None` 拿 plan 去检索，再带 `plan` + `hits` 渲染，分类与拆解各只跑一次
+- 模板改完不用重启（Jinja2 按 mtime 自动重载）；用 `StrictUndefined`，变量名写错立刻抛
 
 ## 数据与切片
 

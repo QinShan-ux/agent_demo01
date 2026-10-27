@@ -5,7 +5,7 @@
     ppt_chunking.py      PPT 讲义的切片与表格文本（课件来源）
     vector_store.py      embedding + faiss 索引构建与持久化 + 向量召回
     retrieval.py         BM25 / RRF / rerank 高级召回 + 多 query 改写
-    pipeline.py          完整问答链路 + 回答模板（HTTP 与 CLI 共用）
+    pipeline.py          完整问答链路（prompt 的模板 / 路由 / 拆解在 prompting 包）
     correction_memory.py 纠错原问题的向量库（MySQL 是对账基准）
     cli.py               检索效果对比的命令行入口，`python -m rag.cli`
 
